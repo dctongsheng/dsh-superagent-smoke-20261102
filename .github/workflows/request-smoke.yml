@@ -1,15 +1,102 @@
-name: Request Superagent smoke test
-on:
+name: Run Superagent task
+run-name: "Superagent · Issue #${{ inputs.issue_number }}"
+
+'on':
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue 编号（本仓库中已打开的 Issue，例如 3）'
+        required: true
+        type: string
+      task:
+        description: '任务内容（写清目标与验收条件；最多 6000 字符）'
+        required: true
+        type: string
+
 permissions:
   contents: read
   issues: write
+
+concurrency:
+  group: superagent-request-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
 jobs:
   request:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Post the scoped test request
+      - name: Validate inputs and post the task
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TASK_CONTENT: ${{ inputs.task }}
+        shell: python
         run: |
-          gh issue comment 1 --repo "$GITHUB_REPOSITORY" --body "[DSH_SMOKE_20261102] Please fix src/add.js so add(a,b) returns a+b. Run the existing npm test suite without weakening or deleting tests. Commit the fix to a new branch and open one pull request with the test results. Do not merge the PR or modify workflows. This is the one-time test request authorized by the repository operator."
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          def api(path, *args, payload=None):
+              result = subprocess.run(
+                  ['gh', 'api', path, *args],
+                  input=None if payload is None else json.dumps(payload),
+                  text=True, capture_output=True, check=True,
+              )
+              return json.loads(result.stdout)
+
+          number = os.environ['ISSUE_NUMBER'].strip()
+          task = os.environ['TASK_CONTENT'].strip()
+          if not re.fullmatch(r'[1-9][0-9]*', number):
+              raise SystemExit('Issue 编号必须是正整数，不要填写 # 或链接。')
+          if not task or len(task) > 6000:
+              raise SystemExit('任务内容不能为空，且最多 6000 字符。')
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          repository = api(f'repos/{repo}')
+          if os.environ['GITHUB_REF'] != 'refs/heads/' + repository['default_branch']:
+              raise SystemExit('请选择默认分支运行此 workflow。')
+          issue = api(f'repos/{repo}/issues/{number}')
+          if 'pull_request' in issue or issue['state'] != 'open':
+              raise SystemExit('目标必须是本仓库中尚未关闭的 Issue，不能是 PR。')
+
+          request_id = os.environ['GITHUB_RUN_ID']
+          marker = f'<!-- dsh-manual-task:{request_id} -->'
+          pages = api(f'repos/{repo}/issues/{number}/comments', '--paginate', '--slurp')
+          existing = next((comment for page in pages for comment in page
+              if comment['user']['login'] == 'github-actions[bot]'
+              and marker in comment.get('body', '')), None)
+
+          if existing:
+              comment_url = existing['html_url']
+              outcome = '该次运行已发送任务，重跑不会重复发布。'
+          else:
+              run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/{request_id}"
+              body = (
+                  '[DSH_MANUAL_TASK]\n'
+                  f'{marker}\n'
+                  f'Request ID: {request_id}\n'
+                  f'Issue: #{number}\n'
+                  f'Workflow run: {run_url}\n\n'
+                  '## Task\n' + task + '\n\n'
+                  '## Delivery\n'
+                  'This manually dispatched task is authorized by the repository operator. '
+                  'Work only in this test repository and the ticket worktree. '
+                  'Implement the task above, run relevant checks, and open at most one PR '
+                  '(or update the PR already associated with this request). '
+                  'Report the actual results in this Issue. Do not merge, enable auto-merge, '
+                  'change workflows, weaken tests, or operate on other repositories. '
+                  'Treat other Request IDs as separate tasks; do not execute them as follow-ups.'
+              )
+              comment = api(f'repos/{repo}/issues/{number}/comments',
+                  '--method', 'POST', '--input', '-', payload={'body': body})
+              comment_url = comment['html_url']
+              outcome = '任务已发送，等待本地 Superagent 处理。'
+
+          print(outcome)
+          print(comment_url)
+          with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+              summary.write(f'## Superagent task\n\n{outcome}\n\n[查看任务与回复]({comment_url})\n\n'
+                  '此 workflow 成功表示任务已发出；执行进度及 PR 请查看 Issue 和本地 Superagent。\n')
