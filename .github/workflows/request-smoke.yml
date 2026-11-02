@@ -1,0 +1,15 @@
+name: Request Superagent smoke test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post the scoped test request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 1 --repo "$GITHUB_REPOSITORY" --body "[DSH_SMOKE_20261102] Please fix src/add.js so add(a,b) returns a+b. Run the existing npm test suite without weakening or deleting tests. Commit the fix to a new branch and open one pull request with the test results. Do not merge the PR or modify workflows. This is the one-time test request authorized by the repository operator."
