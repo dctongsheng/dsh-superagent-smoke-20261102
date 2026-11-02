@@ -20,3 +20,12 @@ Run `npm test` with Node.js 22 or newer. The initial `add` implementation intent
 Actions 成功表示任务评论已发出，不代表模型已完成。Issue 编号必须是已打开的 Issue（不能填 PR），任务内容最多 6000 字符。每次新运行会生成独立 Request ID；对同一 Actions 运行点 **Re-run jobs** 不会重复发任务。对同一 Issue 连续提交任务可能共享讨论上下文，建议等前一任务完成；重复且已完成的工作可能被模型忽略。
 
 生成的 PR 由人工检查和合并。测试入口不会自动合并 PR，也不允许任务修改 workflow。
+
+## 中文快速开始
+
+- 要求 Node.js 22 或更新版本。
+- 运行测试：
+
+```bash
+npm test
+```
